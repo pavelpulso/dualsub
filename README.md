@@ -128,3 +128,7 @@ video ──ffmpeg──▶ 16 kHz mono audio ──ASR engine──▶ source .
 ## License
 
 MIT © 2026
+
+---
+
+<sub>Keywords: speech-to-text · Whisper · Groq · subtitle generator · SRT · language learning · Spanish · dual subtitles · mpv · interSubs</sub>
