@@ -1,0 +1,30 @@
+# media — never commit
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.webm
+*.flv
+*.mp3
+*.wav
+*.flac
+*.m4a
+
+# generated subtitles (keep examples/ only)
+/*.srt
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# models / caches
+models/
+.cache/
+
+.DS_Store
+.idea/

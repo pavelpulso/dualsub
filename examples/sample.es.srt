@@ -1,0 +1,7 @@
+1
+00:00:01,000 --> 00:00:03,000
+No hay nada que contar
+
+2
+00:00:03,500 --> 00:00:05,200
+Confiésalo, vas a salir con ese tío
