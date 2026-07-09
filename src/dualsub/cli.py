@@ -51,7 +51,8 @@ def cmd_transcribe(args) -> Path:
 def cmd_translate(args) -> Path:
     src = Path(args.srt)
     cues = parse_srt(src)
-    translated = translate_cues(cues, target=args.to, source=args.source)
+    translated = translate_cues(cues, target=args.to, source=args.source,
+                                translator=args.translator)
     out = src.with_name(_base_name(src) + "." + args.to + ".srt")
     write_srt(translated, out)
     print(f"translated → {out} ({len(translated)} cues)")
@@ -95,7 +96,8 @@ def cmd_batch(args):
                                          compute_type=args.compute_type))
         if not args.to:
             continue
-        tgt_out = cmd_translate(_ns(srt=str(src_out), to=args.to, source="auto"))
+        tgt_out = cmd_translate(_ns(srt=str(src_out), to=args.to, source="auto",
+                                    translator=args.translator))
         if args.dual:
             cmd_dual(_ns(top=str(src_out), bottom=str(tgt_out), output=None))
 
@@ -130,6 +132,8 @@ def build_parser():
     tr.add_argument("srt")
     tr.add_argument("--to", required=True)
     tr.add_argument("-s", "--source", default="auto")
+    tr.add_argument("--translator", choices=["google", "llm"], default="google",
+                    help="google (fast, free) or llm (context-aware, needs GROQ_API_KEY)")
     tr.set_defaults(func=cmd_translate)
 
     du = sub.add_parser("dual", help="merge two SRTs into dual-language SRT")
@@ -142,6 +146,7 @@ def build_parser():
     b.add_argument("dir")
     b.add_argument("-s", "--source", default="auto")
     b.add_argument("--to", default=None)
+    b.add_argument("--translator", choices=["google", "llm"], default="google")
     b.add_argument("--dual", action="store_true")
     b.add_argument("--force", action="store_true")
     add_engine(b)

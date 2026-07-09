@@ -30,7 +30,9 @@ So I rebuilt it properly. `dualsub` transcribes the **actual audio** of an episo
   | `groq` *(default)* | Speed, no local GPU | Cloud Whisper `large-v3` / `turbo`, ~200× real-time, free tier |
   | `whisperx` | Tightest timestamps | Local faster-whisper + forced alignment (~±50 ms), works offline |
   | `faster-whisper` | Minimal local fallback | Simple, dependency-light |
-- 🌍 **Translate** subtitles to any language (Google Translate via `deep-translator`, multi-threaded).
+- 🌍 **Translate** subtitles to any language, two ways:
+  - `--translator google` *(default)* — Google Translate via `deep-translator`, multi-threaded, no key.
+  - `--translator llm` — **context-aware** translation (Groq LLM). Reads whole scenes, so it gets gender, idioms and word sense right (e.g. Spanish *claro* → *конечно*, not *прозрачный*).
 - 🎬 **Dual subtitles** for language learning — keep both tracks separate and **toggle** them, or merge into one file.
 - 📦 **Batch** a whole season, resumable (skips work already done).
 
@@ -74,6 +76,8 @@ dualsub transcribe episode.mp4 --source es --engine whisperx
 
 # translate an existing subtitle to Russian
 dualsub translate episode.es.srt --to ru
+# context-aware translation (better quality, needs GROQ_API_KEY)
+dualsub translate episode.es.srt --to ru --translator llm
 
 # merge two tracks into one dual-language file
 dualsub dual episode.es.srt episode.ru.srt
@@ -97,7 +101,7 @@ mpv episode.mp4 \
 - **`j`** — cycle subtitle track (Spanish ↔ Russian). Default Spanish.
 - **`v`** — hide/show subtitles.
 
-Watch in Spanish, tap `j` only when a line loses you. For per-word popup translations while staying in Spanish, pair it with [interSubs](https://github.com/oltodosel/interSubs).
+Watch in Spanish, tap `j` only when a line loses you.
 
 ## How it works
 
@@ -120,8 +124,8 @@ video ──ffmpeg──▶ 16 kHz mono audio ──ASR engine──▶ source .
 
 ## Roadmap
 
+- [x] Context-aware LLM translation (idioms, gender, word sense)
 - [ ] Word-level karaoke timing from WhisperX alignment
-- [ ] Optional context-aware translation (LLM) for idioms and names
 - [ ] `.ass` styled output (colored source/target lines)
 - [ ] Per-episode glossary (character names) to stabilize translations
 
@@ -131,4 +135,4 @@ MIT © 2026
 
 ---
 
-<sub>Keywords: speech-to-text · Whisper · Groq · subtitle generator · SRT · language learning · Spanish · dual subtitles · mpv · interSubs</sub>
+<sub>Keywords: speech-to-text · Whisper · Groq · LLM translation · subtitle generator · SRT · language learning · Spanish · dual subtitles · mpv</sub>
