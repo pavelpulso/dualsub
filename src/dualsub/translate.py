@@ -25,17 +25,23 @@ def _lang_name(code: str) -> str:
     return _LANG_NAMES.get(code, code)
 
 
-def translate_cues(cues: list[Cue], target: str, source: str = "auto",
-                   translator: str = "google", retries: int = 3,
-                   workers: int = _WORKERS) -> list[Cue]:
+def translate_texts(texts: list[str], target: str, source: str = "auto",
+                    translator: str = "google", retries: int = 3,
+                    workers: int = _WORKERS, desc: str = "translate") -> list[str]:
     if translator == "llm":
-        return _translate_llm(cues, target, source)
-    return _translate_google(cues, target, source, retries, workers)
+        return _llm(texts, target, source, desc)
+    return _google(texts, target, source, retries, workers, desc)
 
 
-def _translate_google(cues, target, source, retries, workers):
+def translate_cues(cues: list[Cue], target: str, source: str = "auto",
+                   translator: str = "google", **kw) -> list[Cue]:
     texts = [c.text.replace("\n", " ").strip() for c in cues]
+    out = translate_texts(texts, target, source, translator,
+                          desc=f"{translator}→{target}", **kw)
+    return [replace(c, text=out[i]) for i, c in enumerate(cues)]
 
+
+def _google(texts, target, source, retries, workers, desc):
     def one(text):
         if not text:
             return ""
@@ -51,12 +57,10 @@ def _translate_google(cues, target, source, retries, workers):
         return text
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        out = list(tqdm(pool.map(one, texts), total=len(texts),
-                        desc=f"google→{target}", unit="line"))
-    return [replace(c, text=out[i]) for i, c in enumerate(cues)]
+        return list(tqdm(pool.map(one, texts), total=len(texts), desc=desc, unit="line"))
 
 
-def _translate_llm(cues, target, source):
+def _llm(texts, target, source, desc):
     from groq import Groq
 
     if not os.environ.get("GROQ_API_KEY"):
@@ -69,19 +73,17 @@ def _translate_llm(cues, target, source):
         f"{tgt_name}. Use the surrounding lines as context so gender, tense, idioms and meaning "
         f"are correct (e.g. Spanish 'claro' means 'конечно/ясно', never 'прозрачный'). "
         f"Keep each translation short enough to read as a subtitle. "
-        f'Input is a JSON object mapping id→{src_name} text. Return ONLY a JSON object with the '
+        f'Input is a JSON object mapping id->{src_name} text. Return ONLY a JSON object with the '
         f"SAME ids, each mapped to its {tgt_name} translation. Translate every id independently; "
         f"never move a translation to a different id, and never merge or drop ids."
     )
 
-    texts = [c.text.replace("\n", " ").strip() for c in cues]
-    out: list[str] = list(texts)
+    out = list(texts)
     missing: list[int] = []
-
     chunks = [list(range(i, min(i + _LLM_CHUNK, len(texts))))
               for i in range(0, len(texts), _LLM_CHUNK)]
-    for idxs in tqdm(chunks, desc=f"llm→{target}", unit="chunk"):
-        payload = json.dumps({str(n + 1): texts[n] for n in idxs}, ensure_ascii=False)
+    for idxs in tqdm(chunks, desc=desc, unit="chunk"):
+        payload = json.dumps({str(n): texts[n] for n in idxs}, ensure_ascii=False)
         try:
             resp = client.chat.completions.create(
                 model=_LLM_MODEL, temperature=0.2,
@@ -94,7 +96,7 @@ def _translate_llm(cues, target, source):
             print(f"\nllm chunk failed, will fall back: {e}")
             parsed = {}
         for n in idxs:
-            val = parsed.get(str(n + 1))
+            val = parsed.get(str(n))
             if isinstance(val, str) and val.strip():
                 out[n] = val.strip()
             elif texts[n]:
@@ -108,5 +110,4 @@ def _translate_llm(cues, target, source):
                 out[n] = gt.translate(texts[n]) or texts[n]
             except Exception:
                 pass
-
-    return [replace(c, text=out[i]) for i, c in enumerate(cues)]
+    return out

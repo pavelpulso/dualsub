@@ -6,6 +6,27 @@ from pathlib import Path
 VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv"}
 
 
+def is_url(path) -> bool:
+    return str(path).startswith(("http://", "https://"))
+
+
+def download_audio(url: str, workdir, sample_rate: int = 16000) -> Path:
+    import yt_dlp
+
+    out_tmpl = str(Path(workdir) / "%(id)s.%(ext)s")
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_tmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+        "postprocessor_args": ["-ar", str(sample_rate), "-ac", "1"],
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+    return Path(workdir) / f"{info['id']}.mp3"
+
+
 def probe_duration(path) -> float:
     out = subprocess.check_output(
         [
@@ -34,6 +55,8 @@ def extract_audio(video_path, out_path, sample_rate: int = 16000, start: float |
 
 
 def ensure_audio(source_path, workdir, sample_rate: int = 16000) -> tuple[Path, bool]:
+    if is_url(source_path):
+        return download_audio(str(source_path), workdir, sample_rate=sample_rate), True
     src = Path(source_path)
     if src.suffix.lower() not in VIDEO_EXTS:
         return src, False

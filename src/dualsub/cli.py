@@ -4,11 +4,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from .audio import VIDEO_EXTS, ensure_audio
+from .ass import write_ass
+from .audio import VIDEO_EXTS, ensure_audio, is_url
 from .dual import merge_dual
 from .srt import parse_srt, write_srt
 from .transcribe import detect_language, transcribe
 from .translate import translate_cues
+from .vocab import build_deck, write_anki_tsv
 
 ENGINES = ["groq", "whisperx", "faster-whisper"]
 
@@ -31,8 +33,9 @@ def cmd_detect(args):
 
 
 def cmd_transcribe(args) -> Path:
-    video = Path(args.video)
-    audio, tmp = ensure_audio(video, video.parent)
+    url = is_url(args.video)
+    workdir = Path.cwd() if url else Path(args.video).parent
+    audio, tmp = ensure_audio(args.video, workdir)
     try:
         cues, lang = transcribe(
             audio, engine=args.engine, source=(None if args.source == "auto" else args.source),
@@ -41,8 +44,9 @@ def cmd_transcribe(args) -> Path:
     finally:
         if tmp and Path(audio).exists():
             Path(audio).unlink()
-    lang = lang or args.source
-    out = _sub_path(video, lang)
+    lang = lang or (None if args.source == "auto" else args.source) or "src"
+    base = Path(audio) if url else Path(args.video)
+    out = _sub_path(base, lang)
     write_srt(cues, out)
     print(f"transcribed → {out} ({len(cues)} cues, lang={lang})")
     return out
@@ -102,6 +106,26 @@ def cmd_batch(args):
             cmd_dual(_ns(top=str(src_out), bottom=str(tgt_out), output=None))
 
 
+def cmd_vocab(args) -> Path:
+    src = Path(args.srt)
+    cues = parse_srt(src)
+    deck = build_deck(cues, source=args.source, target=args.to, translator=args.translator,
+                      max_zipf=args.max_zipf, limit=args.limit)
+    out = src.with_name(_base_name(src) + ".vocab.tsv")
+    write_anki_tsv(deck, out)
+    print(f"vocab → {out} ({len(deck)} cards; import into Anki as tab-separated)")
+    return out
+
+
+def cmd_color(args) -> Path:
+    src = Path(args.srt)
+    cues = parse_srt(src)
+    out = Path(args.output) if args.output else src.with_name(_base_name(src) + ".color.ass")
+    write_ass(cues, out, lang=args.source, max_zipf=args.max_zipf)
+    print(f"colored subtitles → {out} (rare words highlighted)")
+    return out
+
+
 class _ns:
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -151,6 +175,23 @@ def build_parser():
     b.add_argument("--force", action="store_true")
     add_engine(b)
     b.set_defaults(func=cmd_batch)
+
+    v = sub.add_parser("vocab", help="SRT → Anki flashcard deck of rare words")
+    v.add_argument("srt")
+    v.add_argument("-s", "--source", default="es", help="language of the subtitle")
+    v.add_argument("--to", required=True, help="translation language for card backs")
+    v.add_argument("--translator", choices=["google", "llm"], default="google")
+    v.add_argument("--max-zipf", type=float, default=4.5,
+                   help="keep words with zipf frequency <= this (lower = rarer). default 4.5")
+    v.add_argument("--limit", type=int, default=None)
+    v.set_defaults(func=cmd_vocab)
+
+    co = sub.add_parser("color", help="SRT → .ass with rare words highlighted")
+    co.add_argument("srt")
+    co.add_argument("-s", "--source", default="es")
+    co.add_argument("--max-zipf", type=float, default=4.0)
+    co.add_argument("-o", "--output")
+    co.set_defaults(func=cmd_color)
     return p
 
 

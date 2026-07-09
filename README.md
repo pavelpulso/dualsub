@@ -34,6 +34,9 @@ So I rebuilt it properly. `dualsub` transcribes the **actual audio** of an episo
   - `--translator google` *(default)* — Google Translate via `deep-translator`, multi-threaded, no key.
   - `--translator llm` — **context-aware** translation (Groq LLM). Reads whole scenes, so it gets gender, idioms and word sense right (e.g. Spanish *claro* → *конечно*, not *прозрачный*).
 - 🎬 **Dual subtitles** for language learning — keep both tracks separate and **toggle** them, or merge into one file.
+- 🃏 **Anki vocabulary decks** — extract the rare, worth-learning words from an episode (ranked by frequency) with translation + the real example sentence, exported as a tab-separated deck.
+- 🌈 **Frequency coloring** — export an `.ass` subtitle that highlights the uncommon words, so you see at a glance which vocabulary is new.
+- 🔗 **Any source** — a local file *or* a YouTube/URL (via `yt-dlp`).
 - 📦 **Batch** a whole season, resumable (skips work already done).
 
 ## Proof it works
@@ -71,6 +74,9 @@ dualsub detect episode.mp4
 # transcribe (auto-detect language)
 dualsub transcribe episode.mp4
 
+# transcribe straight from a YouTube / URL
+dualsub transcribe "https://www.youtube.com/watch?v=..." --source es
+
 # force source + a local engine
 dualsub transcribe episode.mp4 --source es --engine whisperx
 
@@ -84,6 +90,12 @@ dualsub dual episode.es.srt episode.ru.srt
 
 # whole folder: transcribe → translate → dual, resumable
 dualsub batch ./season1 --source es --to ru --dual
+
+# build an Anki deck of the rare words in an episode
+dualsub vocab episode.es.srt --source es --to ru
+
+# export subtitles with uncommon words highlighted
+dualsub color episode.es.srt --source es
 ```
 
 Outputs: `name.<lang>.srt` per track, `name.dual.srt` merged.
@@ -120,13 +132,19 @@ video ──ffmpeg──▶ 16 kHz mono audio ──ASR engine──▶ source .
 | `translate.py` | multi-threaded translation of cues |
 | `srt.py` | SRT parse / format / timestamps |
 | `dual.py` | merge two tracks into one |
-| `cli.py` | `detect` / `transcribe` / `translate` / `dual` / `batch` |
+| `tokenize.py` | word tokenization + `wordfreq` rarity scoring |
+| `vocab.py` | build Anki decks from rare words |
+| `ass.py` | `.ass` output with rare words highlighted |
+| `cli.py` | `detect` / `transcribe` / `translate` / `dual` / `batch` / `vocab` / `color` |
 
 ## Roadmap
 
 - [x] Context-aware LLM translation (idioms, gender, word sense)
+- [x] Anki vocabulary decks (frequency-ranked, with example sentences)
+- [x] Frequency-based word highlighting (`.ass`)
+- [x] YouTube / URL input
 - [ ] Word-level karaoke timing from WhisperX alignment
-- [ ] `.ass` styled output (colored source/target lines)
+- [ ] Comprehension metric — track % of lines watched without the translation toggle
 - [ ] Per-episode glossary (character names) to stabilize translations
 
 ## License
