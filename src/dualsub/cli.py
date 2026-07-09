@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from .ass import write_ass
 from .audio import VIDEO_EXTS, ensure_audio, is_url
 from .dual import merge_dual
 from .srt import parse_srt, write_srt
+from . import progress as progress_mod
 from .transcribe import detect_language, transcribe
 from .translate import translate_cues
 from .vocab import build_deck, write_anki_tsv
@@ -98,6 +103,12 @@ def cmd_batch(args):
             src_out = cmd_transcribe(_ns(video=str(video), engine=args.engine, source=args.source,
                                          model=args.model, beam_size=args.beam_size,
                                          compute_type=args.compute_type))
+        lang_code = src_out.stem.rsplit(".", 1)[-1] if "." in src_out.stem else (src_lang or "es")
+        if args.color:
+            cmd_color(_ns(srt=str(src_out), source=lang_code, max_zipf=4.0, output=None))
+        if args.vocab and args.to:
+            cmd_vocab(_ns(srt=str(src_out), source=lang_code, to=args.to,
+                          translator=args.translator, max_zipf=4.5, limit=None))
         if not args.to:
             continue
         tgt_out = cmd_translate(_ns(srt=str(src_out), to=args.to, source="auto",
@@ -124,6 +135,53 @@ def cmd_color(args) -> Path:
     write_ass(cues, out, lang=args.source, max_zipf=args.max_zipf)
     print(f"colored subtitles → {out} (rare words highlighted)")
     return out
+
+
+def cmd_watch(args):
+    video = Path(args.video)
+    src_srt = _sub_path(video, args.source)
+    tgt_srt = _sub_path(video, args.to)
+    if not src_srt.exists() or not tgt_srt.exists():
+        print(f"need both tracks first: {src_srt.name} and {tgt_srt.name}\n"
+              f"run: dualsub transcribe / translate (or batch) for this episode")
+        return
+    lua = Path(__file__).parent / "data" / "progress.lua"
+    out_json = Path(tempfile.mkstemp(prefix="dualsub_", suffix=".json")[1])
+    env = dict(os.environ, DUALSUB_PROGRESS_OUT=str(out_json), DUALSUB_EPISODE=video.stem)
+    subprocess.run([
+        "mpv", str(video), f"--sub-files={src_srt}:{tgt_srt}",
+        "--sub-auto=no", "--sid=1", "--sub-font-size=48", f"--script={lua}",
+    ], env=env)
+
+    if not out_json.exists() or not out_json.read_text().strip():
+        print("no watch data recorded")
+        return
+    data = json.loads(out_json.read_text())
+    out_json.unlink(missing_ok=True)
+    comp = progress_mod.record(data["episode"], data["src_seconds"], data["tgt_seconds"])
+    if comp is None:
+        print("not enough subtitle time to score")
+        return
+    print(f"\ncomprehension: {comp * 100:.0f}%  "
+          f"({args.source} {data['src_seconds']:.0f}s vs {args.to} {data['tgt_seconds']:.0f}s)")
+    s = progress_mod.summary(progress_mod.load())
+    if s["avg_comprehension"] is not None:
+        print(f"season avg: {s['avg_comprehension'] * 100:.0f}%  over {s['episodes']} episode(s)")
+
+
+def cmd_progress(args):
+    rows = progress_mod.load()
+    if not rows:
+        print("no watch history yet — use: dualsub watch <video>")
+        return
+    print(f"{'date':<12}{'episode':<40}{'comprehension':>13}")
+    for r in rows:
+        c = r.get("comprehension")
+        pct = f"{float(c) * 100:.0f}%" if c else "—"
+        print(f"{r['date']:<12}{r['episode'][:38]:<40}{pct:>13}")
+    s = progress_mod.summary(rows)
+    if s["avg_comprehension"] is not None:
+        print(f"\naverage: {s['avg_comprehension'] * 100:.0f}%  over {s['episodes']} episode(s)")
 
 
 class _ns:
@@ -172,6 +230,8 @@ def build_parser():
     b.add_argument("--to", default=None)
     b.add_argument("--translator", choices=["google", "llm"], default="google")
     b.add_argument("--dual", action="store_true")
+    b.add_argument("--vocab", action="store_true", help="also emit an Anki deck per episode")
+    b.add_argument("--color", action="store_true", help="also emit a highlighted .ass per episode")
     b.add_argument("--force", action="store_true")
     add_engine(b)
     b.set_defaults(func=cmd_batch)
@@ -192,6 +252,15 @@ def build_parser():
     co.add_argument("--max-zipf", type=float, default=4.0)
     co.add_argument("-o", "--output")
     co.set_defaults(func=cmd_color)
+
+    w = sub.add_parser("watch", help="watch with toggleable subs + score comprehension")
+    w.add_argument("video")
+    w.add_argument("-s", "--source", default="es")
+    w.add_argument("--to", default="ru")
+    w.set_defaults(func=cmd_watch)
+
+    pr = sub.add_parser("progress", help="show comprehension history")
+    pr.set_defaults(func=cmd_progress)
     return p
 
 
