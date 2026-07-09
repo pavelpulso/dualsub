@@ -13,6 +13,9 @@
 # generated subtitles (keep examples/ only)
 /*.srt
 
+# secrets
+.env
+
 # python
 __pycache__/
 *.pyc
