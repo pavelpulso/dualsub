@@ -60,6 +60,12 @@ def format_srt(cues: list[Cue]) -> str:
     return "\n".join(out) + "\n"
 
 
+def clamp_durations(cues: list[Cue], max_seconds: float = 7.0) -> list[Cue]:
+    for cue in cues:
+        if cue.end - cue.start > max_seconds:
+            cue.end = cue.start + max_seconds
+    return cues
+
 def write_srt(cues: list[Cue], path) -> Path:
     path = Path(path)
     path.write_text(format_srt(cues), encoding="utf-8")
