@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import math
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from .audio import extract_audio, probe_duration
 from .srt import Cue, clamp_durations
 
 GROQ_MODELS = {"large-v3": "whisper-large-v3", "large-v3-turbo": "whisper-large-v3-turbo"}
-GROQ_SIZE_LIMIT = 24 * 1024 * 1024
+GROQ_WINDOW = 15.0
+GROQ_OVERLAP = 4.0
 
 
 def transcribe(audio_path, engine: str = "groq", source: str | None = None,
@@ -46,45 +47,82 @@ def _groq(audio_path, source, model):
     client = Groq()
     groq_model = GROQ_MODELS.get(model, model)
 
-    chunks = _split_for_groq(audio_path)
-    all_cues: list[Cue] = []
+    duration = probe_duration(audio_path)
+    tmpdir = Path(tempfile.mkdtemp(prefix="dualsub_"))
+    cues: list[Cue] = []
     detected = source or ""
-    for offset, chunk in chunks:
-        with open(chunk, "rb") as f:
-            resp = client.audio.transcriptions.create(
-                file=(Path(chunk).name, f.read()),
-                model=groq_model,
-                language=source,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-            )
+    for i, (start, length) in enumerate(_windows(duration)):
+        chunk = tmpdir / f"w{i:04}.mp3"
+        extract_audio(audio_path, chunk, start=start, duration=length)
+        resp = _groq_call(client, chunk, groq_model, source)
         detected = detected or getattr(resp, "language", "") or ""
         for seg in resp.segments:
             text = (seg["text"] if isinstance(seg, dict) else seg.text).strip()
             if not text:
                 continue
-            start = (seg["start"] if isinstance(seg, dict) else seg.start) + offset
-            end = (seg["end"] if isinstance(seg, dict) else seg.end) + offset
-            all_cues.append(Cue(len(all_cues) + 1, float(start), float(end), text))
-    return all_cues, detected
+            s = (seg["start"] if isinstance(seg, dict) else seg.start) + start
+            e = (seg["end"] if isinstance(seg, dict) else seg.end) + start
+            cues.append(Cue(0, float(s), float(e), text))
+    return _dedup(cues), detected
 
 
-def _split_for_groq(audio_path):
-    audio_path = Path(audio_path)
-    size = audio_path.stat().st_size
-    if size <= GROQ_SIZE_LIMIT:
-        return [(0.0, audio_path)]
-    duration = probe_duration(audio_path)
-    n = math.ceil(size / GROQ_SIZE_LIMIT)
-    chunk_len = duration / n
-    tmpdir = Path(tempfile.mkdtemp(prefix="dualsub_"))
-    chunks = []
-    for i in range(n):
-        start = i * chunk_len
-        out = tmpdir / f"chunk_{i:02}.mp3"
-        extract_audio(audio_path, out, start=start, duration=chunk_len)
-        chunks.append((start, out))
-    return chunks
+def _groq_call(client, chunk, groq_model, source, retries=4):
+    for attempt in range(retries):
+        try:
+            with open(chunk, "rb") as f:
+                return client.audio.transcriptions.create(
+                    file=(Path(chunk).name, f.read()),
+                    model=groq_model,
+                    language=source,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"],
+                )
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
+
+
+def _windows(duration, window=GROQ_WINDOW, overlap=GROQ_OVERLAP):
+    hop = window - overlap
+    out = []
+    start = 0.0
+    while start < duration:
+        end = min(start + window, duration)
+        out.append((start, end - start))
+        if end >= duration:
+            break
+        start += hop
+    return out
+
+
+def _norm_words(text):
+    return [w for w in "".join(c.lower() if c.isalnum() or c.isspace() else " "
+                                for c in text).split() if w]
+
+
+def _dedup(cues):
+    cues = sorted(cues, key=lambda c: (c.start, c.end))
+    out: list[Cue] = []
+    for c in cues:
+        if out:
+            p = out[-1]
+            overlap = min(p.end, c.end) - max(p.start, c.start)
+            if overlap > 0:
+                short, long = (c, p) if len(c.text) <= len(p.text) else (p, c)
+                sw = set(_norm_words(short.text))
+                if sw and len(sw & set(_norm_words(long.text))) / len(sw) >= 0.7:
+                    if long is c:
+                        out[-1] = c
+                    continue
+                if c.start < p.end:
+                    c.start = p.end
+                    if c.end - c.start < 0.3:
+                        continue
+        out.append(c)
+    for i, c in enumerate(out, 1):
+        c.index = i
+    return out
 
 
 def _whisperx(audio_path, source, model, compute_type):
