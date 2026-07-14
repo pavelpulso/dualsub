@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from .audio import extract_audio, probe_duration
-from .srt import Cue
+from .srt import Cue, clamp_durations
 
 GROQ_MODELS = {"large-v3": "whisper-large-v3", "large-v3-turbo": "whisper-large-v3-turbo"}
 GROQ_SIZE_LIMIT = 24 * 1024 * 1024
@@ -16,12 +16,14 @@ def transcribe(audio_path, engine: str = "groq", source: str | None = None,
                model: str = "large-v3", beam_size: int = 5,
                compute_type: str = "int8") -> tuple[list[Cue], str]:
     if engine == "groq":
-        return _groq(audio_path, source, model)
-    if engine == "whisperx":
-        return _whisperx(audio_path, source, model, compute_type)
-    if engine == "faster-whisper":
-        return _faster_whisper(audio_path, source, model, beam_size, compute_type)
-    raise ValueError(f"unknown engine: {engine}")
+        cues, lang = _groq(audio_path, source, model)
+    elif engine == "whisperx":
+        cues, lang = _whisperx(audio_path, source, model, compute_type)
+    elif engine == "faster-whisper":
+        cues, lang = _faster_whisper(audio_path, source, model, beam_size, compute_type)
+    else:
+        raise ValueError(f"unknown engine: {engine}")
+    return clamp_durations(cues), lang
 
 
 def _segments_to_cues(segments) -> list[Cue]:
